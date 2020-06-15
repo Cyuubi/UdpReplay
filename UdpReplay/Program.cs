@@ -7,6 +7,8 @@ using System.Collections.Generic;
 using System.Net;
 using System.Net.Sockets;
 using System.Diagnostics;
+using System.Text;
+using System.IO;
 
 namespace UdpReplay
 {
@@ -32,7 +34,7 @@ namespace UdpReplay
 
         static void Main(string[] args)
         {
-            if (args == null || args.Length <= 3)
+            if (args == null || args.Length <= 2)
             {
                 Console.WriteLine($"{Process.GetCurrentProcess().ProcessName}.exe <Capture File> <Client Hardware Address> <Server Port>");
                 return;
@@ -112,9 +114,30 @@ namespace UdpReplay
                 Packet packet = Packet.ParsePacket(e.Packet.LinkLayerType, e.Packet.Data);
                 EthernetPacket ethernetPacket = (EthernetPacket)packet;
 
-                _packets.Add(_packetIndex, new PacketInfo(RemoveTrailingZeros(e.Packet.Data.Skip(0x2A).ToArray()), ethernetPacket.SourceHardwareAddress.ToString() != _clientHardwareAddress));
+                if (ethernetPacket.PayloadPacket.PayloadPacket.HasPayloadData)
+                {
+                    using (MemoryStream stream = new MemoryStream(e.Packet.Data))
+                    using (BinaryReader reader = new BinaryReader(stream))
+                    {
+                        stream.Seek(0x26, SeekOrigin.Begin);
 
-                _packetIndex++;
+                        byte[] _length = reader.ReadBytes(2);
+                        Array.Reverse(_length);
+
+                        ushort length = BitConverter.ToUInt16(_length, 0);
+                        if (length != ethernetPacket.PayloadPacket.PayloadPacket.PayloadData.Length + 8)
+                        {
+                            Console.WriteLine($"Packet {_packetIndex} has failed length check, this packet will be ignored.");
+                            Console.WriteLine($"    Expected Length = {length}, Actual Length = {ethernetPacket.PayloadPacket.PayloadPacket.PayloadData.Length}");
+
+                            return;
+                        }
+                    }
+
+                    _packets.Add(_packetIndex, new PacketInfo(RemoveTrailingZeros(ethernetPacket.PayloadPacket.PayloadPacket.PayloadData), ethernetPacket.SourceHardwareAddress.ToString() != _clientHardwareAddress));
+
+                    _packetIndex++;
+                }
             }
         }
 
