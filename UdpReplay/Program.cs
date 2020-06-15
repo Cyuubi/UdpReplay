@@ -70,6 +70,8 @@ namespace UdpReplay
             IPEndPoint endPoint = new IPEndPoint(IPAddress.Any, Convert.ToInt32(args[2]));
             UdpClient udpClient = new UdpClient(endPoint);
 
+            Console.WriteLine($"Server has started on port {args[2]}.");
+
             IPEndPoint sender = new IPEndPoint(IPAddress.Any, 0);
 
             buffer = udpClient.Receive(ref sender);
