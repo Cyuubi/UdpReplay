@@ -119,7 +119,7 @@ namespace UdpReplay
 
                                     Console.WriteLine($"Packet {_index} was valid, sent packet.");
 
-                                    server.Send(packetInfo.Data, packetInfo.Data.Length, sender);
+                                    server.Send(_packetInfo.Data, _packetInfo.Data.Length, sender);
 
                                     break;
                                 }
