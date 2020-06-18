@@ -8,6 +8,7 @@ using System.Net.Sockets;
 using System.Diagnostics;
 using System.Text;
 using System.IO;
+using System.Linq;
 
 namespace UdpReplay
 {
@@ -29,31 +30,63 @@ namespace UdpReplay
 
         static void Main(string[] args)
         {
-            if (args == null || args.Length <= 2)
+            if (args == null || args.Length <= 1)
             {
-                Console.WriteLine($"{Process.GetCurrentProcess().ProcessName}.exe <Capture> <Client MAC Address> <Port>");
+                Console.WriteLine($"{Process.GetCurrentProcess().ProcessName}.exe <Dump File> <Server Port> [Client MAC Address, only required for PCAP dump file]");
                 return;
             }
 
-            _clientMacAddress = args[1].Replace(":", string.Empty).ToUpper();
+            if (args.Length == 3)
+                _clientMacAddress = args[2].Replace(":", string.Empty).ToUpper();
 
-            ICaptureDevice device;
-
-            try
+            var filename = args[0];
+            if (Path.GetExtension(filename) == ".pcap")
             {
-                device = new CaptureFileReaderDevice(args[0]);
-                device.Open();
+                Console.WriteLine("Detected PCAP dump file.");
+
+                if (string.IsNullOrEmpty(_clientMacAddress))
+                {
+                    Console.WriteLine("Client MAC Address is required.");
+                    return;
+                }
+
+                ICaptureDevice device;
+
+                try
+                {
+                    device = new CaptureFileReaderDevice(filename);
+                    device.Open();
+                }
+                catch (Exception e)
+                {
+                    Console.WriteLine($"An error occured while opening capture: {e}");
+                    return;
+                }
+
+                device.OnPacketArrival += new PacketArrivalEventHandler(OnPacketArrival);
+
+                device.Capture();
+                device.Close();
             }
-            catch (Exception e)
+            else
             {
-                Console.WriteLine($"An error occured while opening capture: {e}");
-                return;
+                Console.WriteLine("Detected raw (possibly Oodly) dump file, parsing as Oodly anyways.");
+
+                foreach (string line in File.ReadAllLines(filename))
+                {
+                    string[] parsed = line.Split(' ');
+
+                    _packets.Add(_packetIndex, new PacketInfo()
+                    {
+                        Data = (byte[])StringToEnumerableByte(parsed[1]),
+
+                        IsServer = parsed[0].Contains("<="),
+                        IsValid = true // Always assume Oodly packets are valid.
+                    });
+
+                    _packetIndex++;
+                }
             }
-
-            device.OnPacketArrival += new PacketArrivalEventHandler(OnPacketArrival);
-
-            device.Capture();
-            device.Close();
 
             _packetIndex = 0;
 
@@ -61,7 +94,7 @@ namespace UdpReplay
             Console.ReadKey();
 
             var buffer = new byte[0];
-            var server = new UdpClient(new IPEndPoint(IPAddress.Any, Convert.ToInt32(args[2])));
+            var server = new UdpClient(new IPEndPoint(IPAddress.Any, Convert.ToInt32(args[1])));
             var sender = new IPEndPoint(IPAddress.Any, 0);
 
             Console.WriteLine($"Server has started on port {args[2]}.");
@@ -72,6 +105,15 @@ namespace UdpReplay
 
                 PushPackets(server, sender);
             }
+        }
+
+        // Copypasta from StackOverflow, I'm lazy.
+        private static IEnumerable<byte> StringToEnumerableByte(string hex)
+        {
+            return Enumerable.Range(0, hex.Length)
+                .Where(x => x % 2 == 0)
+                .Select(x => Convert.ToByte(hex.Substring(x, 2), 16))
+                .ToArray();
         }
 
         private static string EnumerableByteToString(IEnumerable<byte> enumerable)
